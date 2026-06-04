@@ -1,0 +1,5 @@
+*.dylib
+*.o
+__pycache__/
+*.pyc
+test/performance_results.json
