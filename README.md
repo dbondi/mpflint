@@ -1,20 +1,22 @@
 # PSLQ Integer Relation Detection — C/FLINT Implementation
 
-A high-performance reimplementation of Bailey's multipair PSLQ algorithm in C using the [FLINT](https://flintlib.org/) arbitrary-precision library, achieving 4–14× speedups over the reference Fortran/MPFUN2020 implementation across Poisson summation problems.
+A reimplementation of Bailey's multipair PSLQ algorithm in C using the [FLINT](https://flintlib.org/) arbitrary-precision library. On an Apple M1 Max (64 GB), the combined optimizations achieve 4–14× speedups over the single-threaded FLINT baseline (standard strategy, Bailey's default ndpm) across Poisson summation problems.
+
+All benchmarks in this document were run on the same machine: Apple M1 Max, 64 GB RAM, macOS, FLINT 3.5, compiled with `cc -O2 -march=native`.
 
 ## How PSLQ Works
 
-Given a vector of real numbers **x** = (x₁, x₂, ..., xₙ), PSLQ finds integer coefficients **m** = (m₁, m₂, ..., mₙ) such that m₁x₁ + m₂x₂ + ... + mₙxₙ = 0, or proves that no such relation exists below a given norm bound. This is used to discover BBP-type formulas, minimal polynomials, and Poisson summation identities.
+Given a vector of real numbers **x** = (x₁, x₂, ..., xₙ), PSLQ finds integer coefficients **m** = (m₁, m₂, ..., mₙ) such that m₁x₁ + m₂x₂ + ... + mₙxₙ = 0, or certifies that no such relation exists with norm below a computable bound. This is used to discover BBP-type formulas, minimal polynomials, and Poisson summation identities.
 
 The multipair variant operates at three precision levels in a cycle:
 
-1. **DP (double precision, 53 bits)** — Fast inner loop. Selects disjoint pairs of rows using γ-weighted diagonal magnitudes, swaps them, applies Givens rotations, and performs Hermite reduction. Runs up to `ipm` iterations per batch.
+1. **DP (double precision, 53 bits)** — Fast inner loop. Selects disjoint pairs of rows using γ-weighted diagonal magnitudes (γ = √(4/3)), swaps them, applies Givens rotations, and performs Hermite reduction. Runs up to `ipm` iterations per batch.
 
-2. **MPM (medium precision, ndpm digits)** — Applies the accumulated DP row operations to the medium-precision H, y, wa, wb matrices. Detects when DP precision is exhausted (izd=1) or overflows (izd=2), triggering a flush upward.
+2. **MPM (medium precision, ndpm digits)** — Applies the accumulated DP row operations to the medium-precision H, y, wa, wb matrices. Detects when DP precision is exhausted (izd=1: min|dy| < 10⁻¹⁴ or max|da/db| > 10¹³) or fully overflows (izd=2: max|da/db| > 2⁵²), triggering a flush upward.
 
-3. **Full MP (full precision, digits)** — Periodic high-precision sync. Updates the full-precision H, B, y matrices and checks for relation detection. This is the most expensive step (n² × full_prec matrix multiply).
+3. **Full MP (full precision, digits)** — Periodic high-precision sync. Updates the full-precision H, B, y matrices and checks for relation detection. This is the most expensive step (O(n³) arithmetic at full_prec bits).
 
-The algorithm converges when min|y| drops below ε relative to max|y| × max|B_row|, at which point the corresponding row of B gives the integer relation.
+A relation is detected when min|y_i| drops below ε × max|B_row(i)|, at which point the corresponding row of B gives the integer coefficients.
 
 ## What This Implementation Changes
 
@@ -22,9 +24,10 @@ The algorithm converges when min|y| drops below ε relative to max|y| × max|B_r
 
 The single largest source of speedup comes from switching the arithmetic library from MPFUN2020 to FLINT.
 
-FLINT's `fmpz_mat_mul` uses **CRT (Chinese Remainder Theorem) multi-modular arithmetic**: it reduces a big-integer matrix multiply into `(ndpm_bits / 59)` independent word-level (64-bit) matrix multiplies modulo small primes, then reconstructs the result via CRT. Because these word-level multiplies are independent, FLINT can parallelize them across CPU cores — both `mxmdm` (MPM-level matrix multiplies) and `mxm` (fullMP-level matrix multiplies) scale with thread count. The ColPar path additionally splits fullMP multiplies across columns using pthreads with per-column exponent tracking for numerical stability.
+FLINT's `fmpz_mat_mul` uses **CRT (Chinese Remainder Theorem) multi-modular arithmetic**: it reduces a big-integer matrix multiply into independent word-level (64-bit) matrix multiplies modulo small primes, then reconstructs the result via CRT.
 
-MPFUN2020 uses direct big-integer multiplication with Karatsuba/FFT for element-wise operations within its matrix multiply loops. MPFUN is thread-safe but cannot parallelize a single PSLQ run — there are no OpenMP directives in the PSLQ driver code.
+On top of FLINT, we wrote a column-parallel layer (ColPar) that handles threading and precision for both `mxmdm` (MPM updates) and `mxm` (fullMP updates). The problem ColPar solves: FLINT's `fmpz_mat_mul` operates on integer matrices, but our data lives in `arb_t` (floating-point with mantissa × 2^exp). Converting the entire matrix to `fmpz` requires choosing a single minimum exponent and shifting all mantissas to align — but matrix columns can span thousands of bits in magnitude (especially H during fullMP), so a global exponent wastes precision on smaller columns. ColPar splits the B matrix by columns across pthreads, converts each column slice to `fmpz` with its own per-column minimum exponent, calls `fmpz_mat_mul` on the slice, and reconstructs the `arb_t` result. FLINT handles the CRT multiply; ColPar handles the column distribution and exponent bookkeeping.
+
 
 ### 2. ndpm Tuning — CRT Makes Low Precision Cheap
 
@@ -32,20 +35,22 @@ The medium precision level (ndpm) controls the bit-width of the MPM matrices. Ea
 
 Bailey's Fortran code uses conservative ndpm defaults (e.g., ndpm=3000 for s=24, which is `ceil(3000 × 3.32 / 59) ≈ 169` CRT passes per mxmdm). At ndpm=1000, this drops to `ceil(1000 × 3.32 / 59) ≈ 57` passes — 3× fewer.
 
-The tradeoff: lower ndpm exhausts MPM precision faster, triggering more fullMP updates. But at small n (e.g., n=65) each fullMP is cheap (~4s), so the mxmdm savings dominate.
+This is a property of how FLINT structures the computation. Because CRT decomposes the problem into independent word-level multiplies, the cost scales proportionally with the number of passes — halving ndpm roughly halves the mxmdm cost. MPFUN2020 uses Karatsuba/FFT for its big-integer multiplies, where the cost scales sublinearly with precision. Halving ndpm in MPFUN saves less because the FFT-based multiply doesn't get proportionally cheaper.
+
+The tradeoff: lower ndpm exhausts MPM precision faster, triggering more fullMP updates. fullMP is expensive — it involves O(n³) arithmetic at full precision (thousands of digits), so the cost of each additional fullMP is not negligible. But at small n (e.g., n=65) each fullMP is ~4s, while the mxmdm savings from halving ndpm can be hundreds of seconds, so the tradeoff is favorable. At larger n (e.g., n=197) each fullMP costs ~34s, which shifts the optimal ndpm higher. The key point is that CRT makes the mxmdm side of this tradeoff much steeper than it would be with FFT-based arithmetic, so the optimal ndpm is lower with FLINT than with MPFUN.
 
 **psi_s24 ndpm sweep (predicted_swap, 1 thread):**
 
-| ndpm | Wall time | mxmdm time | fullMP count |
-|------|-----------|-----------|--------------|
-| 3000 (Bailey default) | 481s | 827s | 7 |
-| 1500 | 222s | — | 13 |
-| 1000 | 176s | 991s | 18 |
-| 700 | 178s | 1042s | 26 |
+| ndpm | CRT passes per mxmdm | Wall time | fullMP count |
+|------|---------------------|-----------|--------------|
+| 3000 (Bailey default) | ~169 | 476s | 7 |
+| 1500 | ~85 | 220s | 13 |
+| 1000 | ~57 | 175s | 18 |
+| 700 | ~40 | 178s | 26 |
 
-The optimal ndpm balances mxmdm savings against fullMP cost. For n=65 problems, ndpm=700–1000 is optimal. For larger n (S29, n=197) where each fullMP costs ~34s, the optimal ndpm stays closer to Bailey's default.
+The optimal ndpm balances cheaper mxmdm calls against more frequent fullMP updates. For n=65 problems, ndpm=700–1000 is optimal — below 700, the fullMP count rises fast enough to offset the mxmdm savings. For larger n (S29, n=197) where each fullMP costs ~34s, the optimal ndpm stays closer to Bailey's default.
 
-This optimization is **free** — it requires no code changes, just setting a lower ndpm value.
+This requires no code changes, just setting a lower ndpm value. Finding the optimal value for a new problem does require an empirical sweep.
 
 ### 3. Intermediate Precision Layer (IP/QP)
 
@@ -57,11 +62,11 @@ DP (53 bits) → IP (~200-500 bits) → MPM (~10K bits) → Full MP
 
 When DP precision exhausts (izd=1), instead of flushing to MPM at full mpm_prec cost, the DP operations are applied to the IP-precision copies of H and y. The IP layer accumulates these updates as exact integer matrices (qa, qb) and only flushes to MPM when the IP precision itself exhausts.
 
-Each IP-level matrix multiply is much cheaper than MPM-level (200 bits vs 10000 bits = 50× fewer CRT passes), so absorbing 5-10 DP flushes at IP cost before one MPM flush saves significant time.
+The DP row operations (da, db matrices) are integer-valued at double precision — they consist of rounded Hermite reduction coefficients. The IP layer accumulates these as exact `fmpz_mat` products (ia = da × ia_prev), avoiding any floating-point truncation in the accumulation itself. The IP-precision copies of H and y absorb these operations at ~200 bits instead of ~10,000 bits, so each IP-level matrix multiply uses far fewer CRT passes than an MPM-level one.
 
 **When IP works:** The IP layer requires two conditions:
-- **H matrix column spread > 370 bits** — determined by |log₁₀(α)| × (n-1) × 3.32. When H entries span a wide range, IP has room to absorb DP flushes before exhausting.
-- **Baseline izd=2 = 0** — izd=2 means DP fully overflows (da/db entries exceed 2^52). When this happens, the savedp restore mechanism kicks in, and IP can't help because the DP state needs full reconstruction.
+- **H_col_spread > 370 bits** — H_col_spread is the range of column magnitudes in the initial H matrix, measured as `max_col_exp - min_col_exp` in bits across all columns. It is determined by the input constant: roughly `|log₁₀(α)| × (n-1) × 3.32` bits. When H entries span a wide range, IP has room to absorb multiple DP flushes before its own precision exhausts.
+- **Baseline izd=2 = 0** — izd=2 events mean DP fully overflows (max|da/db| > 2⁵²), requiring a full savedp restore. When these occur, the IP layer cannot help because the DP state needs reconstruction from the last checkpoint, not a precision flush.
 
 **Optimal IP value:** H_col_spread / 6 (validated across 8 problems within ±10%). This could be computed automatically at runtime from the initial H matrix.
 
@@ -69,26 +74,34 @@ Each IP-level matrix multiply is much cheaper than MPM-level (200 bits vs 10000 
 
 ### 4. Predicted Swap Strategy
 
-Bailey's original PSLQ selects swap pairs based on γ^i × |H[i,i]| ranking, with no additional sorting. The **predicted_swap** strategy adds a Givens-aware bidirectional insertion sort after each DP iteration:
+Bailey's original PSLQ selects swap pairs based on γ^i × |H[i,i]| ranking — it picks the disjoint pairs with the largest weighted diagonals, swaps them, applies Givens rotations, and moves on. No further reordering is done within the DP iteration.
 
-For each position, before committing to a swap, it:
-1. **Simulates the Givens rotation** that would follow the swap, predicting the new diagonal values
-2. **Checks the diagsum criterion**: only swaps if |new_d[r]| + |new_d[r+1]| < |old_d[r]| + |old_d[r+1]|
-3. **Checks neighbor impact**: verifies the swap won't worsen the adjacent position's diagonal, preventing oscillation
+The **predicted_swap** strategy adds a second pass: after the standard pair selection and Givens rotations, it runs a bidirectional insertion sort over the H diagonal. Each candidate swap is evaluated by simulating the Givens rotation that would follow:
 
-This produces more swaps per iteration (each guaranteed to improve diagsum) and better convergence:
+1. For a candidate swap at position r, compute `d = sqrt(H[r+1,r]² + H[r+1,r+1]²)` — what `H[r,r]` would become after rotation.
+2. Compute the predicted `H[r+1,r+1]` from the rotation formula.
+3. Accept only if the predicted diagonal sum improves: `|new_d[r]| + |new_d[r+1]| < |old_d[r]| + |old_d[r+1]|`.
+4. Check the **neighbor position** — verify the swap won't worsen the adjacent diagonal, preventing oscillation.
 
-| Problem | Standard iterations | Predicted_swap iterations | Ratio |
-|---------|-------------------|-------------------------|-------|
-| psi_s24 (n=65) | 94,272 | 27,594 | 3.4× |
-| S29 (n=197) | ~166,000 | ~34,000 | 4.8× |
+The forward pass sorts left to right, the backward pass right to left.
 
-The iteration reduction doesn't always translate directly to wall-time improvement — the strategy adds O(n) work per DP iteration for the sorting passes. The real benefit comes when fewer iterations mean fewer of a specific expensive operation:
+**Where it matters most.** Predicted_swap's impact scales with problem difficulty. On phi_s29 (n=197), the profile data shows clearly how the iteration reduction cascades:
 
-- **Fewer mxmdm calls**: Each MPM update batch costs O(n² × ndpm). Fewer DP iterations = fewer batches.
-- **Fewer fullMP triggers**: Some fullMP events are triggered by wa/wb overflow (izmm=1). Fewer DP iterations means less wa/wb growth between fullMPs, sometimes eliminating overflow-triggered fullMPs entirely.
+| Metric | Standard | Predicted_swap | Reduction |
+|--------|----------|---------------|-----------|
+| DP iterations | 166,000 | 34,000 | 4.8× |
+| mxmdm calls | 24,872 | 8,588 | 2.9× |
+| updtmpm calls | 6,218 | 2,147 | 2.9× |
+| fullMP triggers | 77 | 63 | 1.2× |
+| Wall time (1 thread) | 7,387s | 3,596s | 2.1× |
 
-On psi_s24, predicted_swap gives 1.1× at ndpm=3000 (mxmdm dominates equally) but compounds with ndpm tuning for 3.0× total. On S29, the 4.8× iteration reduction translates to 1.9× wall time because the mxmdm savings from fewer iterations are significant at n=197.
+The 4.8× DP iteration reduction directly causes 2.9× fewer MPM-level matrix multiplies (mxmdm), because fewer DP iterations means fewer batches that need to be flushed to MPM. The fullMP reduction is smaller (1.2×) but still contributes — each fullMP at n=197 costs ~34s at 1 thread. The net wall-time speedup of 2.1× comes primarily from the mxmdm savings.
+
+This doesn't always translate to meaningful speedup. On psi_s24 (n=65), predicted_swap still reduces iterations by 3.4× — but the wall-time improvement is only 1.1× (529s → 476s). At n=65, each mxmdm call is cheap enough that doing fewer of them barely matters; the total mxmdm time dominates regardless. The iteration reduction is real but the operations it saves are inexpensive. Predicted_swap's value grows with n, where the per-call cost of mxmdm rises and each avoided call saves more time.
+
+**Convergence.** We have not proved that predicted_swap preserves the theoretical convergence guarantees of PSLQ. Bailey's convergence proof relies on the specific γ-weighted pair selection rule; our additional sorting passes modify the row ordering beyond what the proof covers. In practice, predicted_swap has found correct relations on every problem tested — including problems up to n=197 at 20,000-digit precision — and has never failed to converge where standard PSLQ succeeds. But this is empirical stability, not a proof.
+
+**Relationship to other strategies.** Predicted_swap was selected from an exhaustive search over ~100 sorting variants, including: pure bidirectional sort without simulation, exponential decay weighting, product and max-reduction criteria, multi-pass variants, rolling-window lookahead, and numerous heuristic scoring functions. Many produce similar iteration counts to predicted_swap. This one was the fastest across problem families tested and has been stable on every problem — several of the alternatives occasionally caused divergence on specific problems where predicted_swap did not.
 
 ### 5. Threading
 
@@ -98,8 +111,8 @@ The tradeoffs from lower ndpm (more fullMPs) and predicted_swap (more mxmdm call
 
 | Threads | Time | Speedup |
 |---------|------|---------|
-| 1 | 118s | 1.0× |
-| 4 (Apple M-series) | 38s | 3.1× |
+| 1 | 116s | 1.0× |
+| 4 (M1 Max) | 37.6s | 3.1× |
 
 Scaling is near-linear to 4 threads on Apple Silicon. Previous AWS benchmarks showed useful scaling to 8-16 threads on AMD EPYC (64 vCPU), with diminishing returns past 16 for n=65 matrices.
 
@@ -111,12 +124,11 @@ All optimizations stack multiplicatively:
 
 | Optimization | Wall | Cumulative speedup |
 |-------------|------|--------------------|
-| MPFUN2020 ndpm=3000, 1 thread | 532s | baseline |
-| FLINT standard ndpm=3000 | 481s | 1.1× |
-| + ndpm=1000 | 195s | 2.7× |
-| + predicted_swap | 176s | 3.0× |
-| + IP=300 | 118s | 4.5× |
-| + 4 threads | 38s | **14×** |
+| FLINT standard ndpm=3000, 1 thread | 529s | baseline |
+| + predicted_swap | 476s | 1.1× |
+| + ndpm=1000 | 175s | 3.0× |
+| + IP=300 | 116s | 4.6× |
+| + 4 threads | 37.6s | **14×** |
 
 **Poisson φ₂ s=29 (n=197), 4 threads — no QP (izd=2 prevents it):**
 
@@ -124,19 +136,19 @@ All optimizations stack multiplicatively:
 |--------|------|--------------------|
 | standard ndpm=1000 | 2511s (42 min) | baseline |
 | predicted_swap ndpm=1000 | 1183s (20 min) | 2.1× |
-| predicted_swap ndpm=800 | 1088s (18 min) | **2.3×** |
 | predicted_swap ndpm=600 | 1088s (18 min) | 2.3× |
+| predicted_swap ndpm=800 | 1088s (18 min) | **2.3×** |
 
-**phi_s29 cumulative speedup (n=197, no QP available):**
+**phi_s29 cumulative speedup (n=197, no IP available):**
 
-| Config | Time | vs standard 1-thread |
-|--------|------|---------------------|
-| standard ndpm=1000, 1 thread | 7387s (2.1 hr) | baseline |
-| + predicted_swap | 3596s (60 min) | 2.1× |
-| + 4 threads | 1183s (20 min) | 6.2× |
-| + ndpm=800 | 1088s (18 min) | **6.8×** |
+| Config | Time | vs baseline |
+|--------|------|------------|
+| standard ndpm=1000, 1 thread | 7,387s (2.1 hr) | baseline |
+| + predicted_swap | 3,596s (60 min) | 2.1× |
+| + 4 threads | 1,183s (20 min) | 6.2× |
+| + ndpm=800 | 1,088s (18 min) | **6.8×** |
 
-phi_s29 gains are smaller than psi_s24 because QP is unavailable (izd=2 > 0) and fullMP dominates at n=197 (~34s per fullMP at 1 thread). The predicted_swap iteration reduction (4.8× fewer) still translates to 2.1× wall time through fewer mxmdm calls, and threading adds another 3.0×.
+Note: phi_s29's default ndpm is already 1000 (Bailey's setting for this problem), so unlike psi_s24 there is no large ndpm reduction available. phi_s29 gains are smaller than psi_s24 because IP is unavailable (izd=2 > 0) and fullMP dominates at n=197 (~34s per fullMP at 1 thread). The predicted_swap iteration reduction (4.8× fewer) translates to 2.1× wall time through fewer mxmdm calls, and threading adds another 3.0×.
 
 ## When Each Optimization Helps
 
