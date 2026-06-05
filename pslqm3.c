@@ -47,25 +47,12 @@
  * Global state
  * ================================================================ */
 
-static int g_debug = 0;
 static int g_strategy = 1;        /* 0=standard, 1=predicted_swap */
 static int g_ipm_override = 0;
-static long g_nudge_swap_cnt = 0;
+static long g_predicted_swap_cnt = 0;
 static long g_pairsel_swap_cnt = 0;
-static int g_rot_counts[4096];
-static int g_pairsel_counts[4096];
-static int g_rot_n = 0;
 
 int g_colpar_threads = 1;
-
-#define LOG(fmt, ...) do { \
-    if (g_debug) { \
-        struct timespec _ts; clock_gettime(CLOCK_MONOTONIC, &_ts); \
-        double _t = (double)_ts.tv_sec + (double)_ts.tv_nsec * 1e-9; \
-        fprintf(stderr, "[%12.3f] " fmt "\n", _t, ##__VA_ARGS__); \
-        fflush(stderr); \
-    } \
-} while(0)
 
 #include "pslq_sort.c"
 
@@ -73,6 +60,7 @@ int g_colpar_threads = 1;
  * Profiling counters
  * ================================================================ */
 
+/* Profiling counters */
 double g_mxmdm_sec = 0.0;
 int    g_mxmdm_calls = 0;
 double g_mxm_sec = 0.0;
@@ -192,12 +180,9 @@ static void initmpm(int idb, int n, int nsq, slong mpm_prec,
     }
     arf_clear(af1); arf_clear(afmax); arf_clear(afone); arf_clear(afscale);
 
-    for (int j = 0; j < n; j++) {
-        for (int i = 0; i < n; i++) {
-            if (j < n1)
-                mp_set_round(AM(wh, i, j, n1), h+(i * n1 + j), mpm_prec);
-        }
-    }
+    for (int j = 0; j < n1; j++)
+        for (int i = 0; i < n; i++)
+            mp_set_round(AM(wh, i, j, n1), h+(i * n1 + j), mpm_prec);
 
     for (int j = 0; j < n; j++) {
         for (int i = 0; i < n; i++) {
@@ -348,8 +333,8 @@ static void lqmpm(int n, int m, slong mpm_prec, arb_ptr h)
     clock_gettime(CLOCK_MONOTONIC, &_t0);
     int lup = (m < n) ? m : n;
 
-    arb_t t, t2, nrmxl;
-    arb_init(t); arb_init(t2); arb_init(nrmxl);
+    arb_t t, nrmxl;
+    arb_init(t); arb_init(nrmxl);
 
     for (int l = 0; l < lup; l++) {
         if (l == m - 1) continue;
@@ -392,7 +377,7 @@ static void lqmpm(int n, int m, slong mpm_prec, arb_ptr h)
         for (int i = 0; i < j; i++)
             arb_zero(AM(h, i, j, m));
 
-    arb_clear(t); arb_clear(t2); arb_clear(nrmxl);
+    arb_clear(t); arb_clear(nrmxl);
     clock_gettime(CLOCK_MONOTONIC, &_t1);
     g_lqmpm_sec += (double)(_t1.tv_sec - _t0.tv_sec) + (double)(_t1.tv_nsec - _t0.tv_nsec) * 1e-9;
     g_lqmpm_calls++;
@@ -463,22 +448,22 @@ static void iterdp(int idb, int it, int n, int nsq,
     {
         int ii = n1;
         for (int i = 0; i < mq; i++) {
-        tag100_dp:
+        full_reinit_dp:
             ii = ii - 1;
             if (ii < 0) {
                 actual_mq = i;
-                goto tag110_dp;
+                goto check_wy_dp;
             }
             int j1 = ip[ii];
             int j2 = j1 + 1;
-            if (is_buf[j1] != 0 || is_buf[j2] != 0) goto tag100_dp;
+            if (is_buf[j1] != 0 || is_buf[j2] != 0) goto full_reinit_dp;
             ir[i] = j1;
             is_buf[j1] = 1;
             is_buf[j2] = 1;
             actual_mq = i + 1;
         }
     }
-tag110_dp:
+check_wy_dp:
     mq = actual_mq;
 
     for (int j = 0; j < mq; j++) {
@@ -487,8 +472,6 @@ tag110_dp:
         double t1;
 
         g_pairsel_swap_cnt++;
-        g_pairsel_counts[im]++;
-        g_pairsel_counts[im1]++;
 
         t1 = dy[im]; dy[im] = dy[im1]; dy[im1] = t1;
 
@@ -670,21 +653,21 @@ static void itermpm(int idb, int it, int n, int nsq, slong mpm_prec,
     int ii = n1;
     int actual_mq = 0;
     for (int i = 0; i < mq; i++) {
-    tag100_mpm:
+    full_reinit_mpm:
         ii = ii - 1;
         if (ii < 0) {
             actual_mq = i;
-            goto tag110_mpm;
+            goto check_wy_mpm;
         }
         int j1 = ip[ii];
         int j2 = j1 + 1;
-        if (is_arr[j1] != 0 || is_arr[j2] != 0) goto tag100_mpm;
+        if (is_arr[j1] != 0 || is_arr[j2] != 0) goto full_reinit_mpm;
         ir[i] = j1;
         is_arr[j1] = 1;
         is_arr[j2] = 1;
         actual_mq = i + 1;
     }
-tag110_mpm:
+check_wy_mpm:
     mq = actual_mq;
 
     for (int j = 0; j < mq; j++) {
@@ -1081,6 +1064,131 @@ static void updtmp(int idb, int it, int n, slong full_prec, slong mpm_prec,
 }
 
 /* ================================================================
+ * dp_swap_and_rotate — swap adjacent rows im,im+1 and apply Givens
+ * ================================================================ */
+
+static void dp_swap_and_rotate(int n, int im, double *da, double *db,
+                               double *dh, double *dy)
+{
+    int im1 = im + 1;
+    double tmp;
+
+    tmp = dy[im]; dy[im] = dy[im1]; dy[im1] = tmp;
+
+    for (int k = 0; k < n; k++) {
+        tmp = DM(da, im, k, n); DM(da, im, k, n) = DM(da, im1, k, n); DM(da, im1, k, n) = tmp;
+        tmp = DM(db, im, k, n); DM(db, im, k, n) = DM(db, im1, k, n); DM(db, im1, k, n) = tmp;
+    }
+
+    for (int k = 0; k < n - 1; k++) {
+        tmp = DM(dh, im, k, n); DM(dh, im, k, n) = DM(dh, im1, k, n); DM(dh, im1, k, n) = tmp;
+    }
+
+    if (im <= n - 3) {
+        double t1 = DM(dh, im, im, n), t2 = DM(dh, im, im1, n);
+        double t3 = sqrt(t1 * t1 + t2 * t2);
+        if (t3 > 0) {
+            t1 /= t3; t2 /= t3;
+            for (int ii = im; ii < n; ii++) {
+                double a = DM(dh, ii, im, n), b = DM(dh, ii, im1, n);
+                DM(dh, ii, im, n) = t1 * a + t2 * b;
+                DM(dh, ii, im1, n) = -t2 * a + t1 * b;
+            }
+        }
+    }
+
+    g_predicted_swap_cnt++;
+}
+
+/* ================================================================
+ * predicted_swap — Givens-aware bidirectional insertion sort
+ * ================================================================ */
+
+static void predicted_swap(int n, double *da, double *db, double *dh, double *dy)
+{
+    /* Forward pass: sort left to right */
+    for (int i = 1; i < n - 1; i++) {
+        int j = i;
+        while (j > 0) {
+            int r = j - 1;
+            double os = fabs(DM(dh, r, r, n));
+            double nr, nr1, dv = 0;
+            if (r <= n - 3) {
+                os += fabs(DM(dh, r+1, r+1, n));
+                double a = DM(dh, r+1, r, n), b = DM(dh, r+1, r+1, n);
+                dv = sqrt(a*a + b*b);
+                nr = dv;
+                nr1 = (dv > 1e-300) ? (-DM(dh, r, r, n)*b + DM(dh, r, r+1, n)*a)/dv : DM(dh, r, r+1, n);
+            } else {
+                nr = DM(dh, r+1, r, n);
+                nr1 = 0.0;
+            }
+            if (fabs(nr) + fabs(nr1) >= os) break;
+
+            int ok = 1;
+            if (r > 0 && r <= n - 3 && dv > 1e-300) {
+                double x = DM(dh, r+1, r-1, n);
+                double d2 = sqrt(x*x + dv*dv);
+                double A = fabs(DM(dh, r-1, r-1, n));
+                if (d2 > 1e-300) {
+                    if (d2 + dv * A / d2 - A - dv >= 0.0) ok = 0;
+                }
+            }
+            if (ok) { dp_swap_and_rotate(n, r, da, db, dh, dy); j--; }
+            else break;
+        }
+    }
+
+    /* Backward pass: sort right to left */
+    for (int i = n - 3; i >= 0; i--) {
+        int j = i;
+        while (j < n - 2) {
+            int r = j;
+            double os = fabs(DM(dh, r, r, n));
+            double nr, nr1, dv = 0;
+            double av = 0, bv = 0;
+            if (r <= n - 3) {
+                os += fabs(DM(dh, r+1, r+1, n));
+                av = DM(dh, r+1, r, n); bv = DM(dh, r+1, r+1, n);
+                dv = sqrt(av*av + bv*bv);
+                nr = dv;
+                nr1 = (dv > 1e-300) ? (-DM(dh, r, r, n)*bv + DM(dh, r, r+1, n)*av)/dv : DM(dh, r, r+1, n);
+            } else {
+                nr = DM(dh, r+1, r, n);
+                nr1 = 0.0;
+            }
+            if (fabs(nr) + fabs(nr1) >= os) break;
+
+            int ok = 1;
+            if (r <= n - 4 && dv > 1e-300) {
+                double y = (-bv * DM(dh, r+2, r, n) + av * DM(dh, r+2, r+1, n)) / dv;
+                double B = fabs(DM(dh, r+2, r+2, n));
+                double C = fabs(nr1);
+                double d3 = sqrt(y*y + B*B);
+                if (d3 > 1e-300) {
+                    if (d3 + B * C / d3 - C - B >= 0.0) ok = 0;
+                }
+            }
+            if (ok) { dp_swap_and_rotate(n, r, da, db, dh, dy); j++; }
+            else break;
+        }
+    }
+}
+
+/* ================================================================
+ * strip_radius — zero error balls on wa/wb (Fortran has no balls)
+ * ================================================================ */
+
+static void strip_radius(int n, arb_ptr wa, arb_ptr wb)
+{
+    for (int j = 0; j < n; j++)
+        for (int i = 0; i < n; i++) {
+            mag_zero(arb_radref(AM(wa, i, j, n)));
+            mag_zero(arb_radref(AM(wb, i, j, n)));
+        }
+}
+
+/* ================================================================
  * pslqm3 — main loop
  * ================================================================ */
 
@@ -1111,11 +1219,8 @@ static int pslqm3(int idb, int n, slong full_prec, slong mpm_prec,
 
     int cnt_izd0 = 0, cnt_izd1 = 0, cnt_izd2 = 0, cnt_fullmp = 0, cnt_savedp = 0;
     int cnt_fullmp_izmm1 = 0, cnt_fullmp_izd2 = 0, cnt_fullmp_mpm = 0;
-    g_nudge_swap_cnt = 0;
+    g_predicted_swap_cnt = 0;
     g_pairsel_swap_cnt = 0;
-    g_rot_n = n;
-    memset(g_rot_counts, 0, sizeof(g_rot_counts));
-    memset(g_pairsel_counts, 0, sizeof(g_pairsel_counts));
     g_izmm_wy_small = 0;
     g_izmm_wy_ratio = 0;
     g_izmm_wab_large = 0;
@@ -1176,8 +1281,10 @@ static int pslqm3(int idb, int n, slong full_prec, slong mpm_prec,
     if (idb >= 2) fprintf(stderr, "Iteration %8d  MP initialization\n", it);
     initmp(idb, n, full_prec, b, h, x, y);
 
-    /* ======== Main loop: tag 100 ======== */
-tag100:
+    /* State machine (Fortran tag origins):
+     *   full_reinit=100  check_wy=110  dp_iter=120
+     *   mpm_section=130  mpm_iter=140  detect=150  cleanup=160 */
+full_reinit: /* tag100 */
     dynrange(n, mpm_prec, y, w1);
     if (idb >= 2) {
         double d1; int n1_v;
@@ -1191,7 +1298,7 @@ tag100:
         initip(n, g_ip_prec, ih, iy, wh, wy, ia_accum, ib_accum);
 
     /* ======== tag 110 ======== */
-tag110:
+check_wy:
     dynrangem(n, mpm_prec, wy, w1);
 
     {
@@ -1200,7 +1307,7 @@ tag110:
         mp_set_d(dreps_arb, dreps);
         if (arb_cmp_mid(w1, dreps_arb) < 0 || izd == 2) {
             arb_clear(dreps_arb);
-            goto tag130;
+            goto mpm_section;
         }
         arb_clear(dreps_arb);
     }
@@ -1217,7 +1324,7 @@ tag110:
     lqdp(n, n1, n, dh);
 
     /* ======== DP iteration loop: tag 120 ======== */
-tag120:
+dp_iter:
     it = it + 1;
     if (idb >= 4 || (idb >= 2 && it % ipi == 0))
         fprintf(stderr, "Iteration %8d\n", it);
@@ -1232,104 +1339,10 @@ tag120:
             its = it;
         }
 
-        /* ============ Strategy dispatch ============ */
-        if (g_strategy == 1) {
-            /* predicted_swap: Givens-aware bidirectional insertion sort */
-#define NUDGE_SWAP(_im) do { \
-    int _im_ = (_im), _im1_ = _im_ + 1; \
-    double _tmp_; \
-    _tmp_ = dy[_im_]; dy[_im_] = dy[_im1_]; dy[_im1_] = _tmp_; \
-    for (int _k_ = 0; _k_ < n; _k_++) { \
-        _tmp_ = DM(da, _im_, _k_, n); DM(da, _im_, _k_, n) = DM(da, _im1_, _k_, n); DM(da, _im1_, _k_, n) = _tmp_; \
-        _tmp_ = DM(db, _im_, _k_, n); DM(db, _im_, _k_, n) = DM(db, _im1_, _k_, n); DM(db, _im1_, _k_, n) = _tmp_; \
-    } \
-    for (int _k_ = 0; _k_ < n - 1; _k_++) { \
-        _tmp_ = DM(dh, _im_, _k_, n); DM(dh, _im_, _k_, n) = DM(dh, _im1_, _k_, n); DM(dh, _im1_, _k_, n) = _tmp_; \
-    } \
-    if (_im_ <= n - 3) { \
-        double _t1_ = DM(dh, _im_, _im_, n), _t2_ = DM(dh, _im_, _im1_, n); \
-        double _t3_ = sqrt(_t1_ * _t1_ + _t2_ * _t2_); \
-        if (_t3_ > 0) { \
-            _t1_ /= _t3_; _t2_ /= _t3_; \
-            for (int _ii_ = _im_; _ii_ < n; _ii_++) { \
-                double _a_ = DM(dh, _ii_, _im_, n), _b_ = DM(dh, _ii_, _im1_, n); \
-                DM(dh, _ii_, _im_, n) = _t1_ * _a_ + _t2_ * _b_; \
-                DM(dh, _ii_, _im1_, n) = -_t2_ * _a_ + _t1_ * _b_; \
-            } \
-        } \
-    } \
-    g_nudge_swap_cnt++; \
-    g_rot_counts[_im_]++; \
-    g_rot_counts[_im1_]++; \
-} while(0)
+        if (g_strategy == 1)
+            predicted_swap(n, da, db, dh, dy);
 
-            /* Forward pass */
-            for (int _i = 1; _i < n - 1; _i++) {
-                int _j = _i;
-                while (_j > 0) {
-                    int _r = _j - 1;
-                    double _os = fabs(DM(dh, _r, _r, n));
-                    double _nr, _nr1, _dv = 0;
-                    if (_r <= n - 3) {
-                        _os += fabs(DM(dh, _r+1, _r+1, n));
-                        double _a = DM(dh,_r+1,_r,n), _b = DM(dh,_r+1,_r+1,n);
-                        _dv = sqrt(_a*_a + _b*_b);
-                        _nr = _dv;
-                        _nr1 = (_dv > 1e-300) ? (-DM(dh,_r,_r,n)*_b + DM(dh,_r,_r+1,n)*_a)/_dv : DM(dh,_r,_r+1,n);
-                    } else { _nr = DM(dh, _r+1, _r, n); _nr1 = 0.0; }
-                    if (fabs(_nr) + fabs(_nr1) >= _os) break;
-
-                    int _ok = 1;
-                    if (_r > 0 && _r <= n - 3 && _dv > 1e-300) {
-                        double _x = DM(dh, _r+1, _r-1, n);
-                        double _d2 = sqrt(_x*_x + _dv*_dv);
-                        double _A = fabs(DM(dh, _r-1, _r-1, n));
-                        if (_d2 > 1e-300) {
-                            double _la = _d2 + _dv * _A / _d2 - _A - _dv;
-                            if (_la >= 0.0) _ok = 0;
-                        }
-                    }
-                    if (_ok) { NUDGE_SWAP(_r); _j--; }
-                    else break;
-                }
-            }
-            /* Backward pass */
-            for (int _i = n - 3; _i >= 0; _i--) {
-                int _j = _i;
-                while (_j < n - 2) {
-                    int _r = _j;
-                    double _os = fabs(DM(dh, _r, _r, n));
-                    double _nr, _nr1, _dv = 0;
-                    double _av = 0, _bv = 0;
-                    if (_r <= n - 3) {
-                        _os += fabs(DM(dh, _r+1, _r+1, n));
-                        _av = DM(dh,_r+1,_r,n); _bv = DM(dh,_r+1,_r+1,n);
-                        _dv = sqrt(_av*_av + _bv*_bv);
-                        _nr = _dv;
-                        _nr1 = (_dv > 1e-300) ? (-DM(dh,_r,_r,n)*_bv + DM(dh,_r,_r+1,n)*_av)/_dv : DM(dh,_r,_r+1,n);
-                    } else { _nr = DM(dh, _r+1, _r, n); _nr1 = 0.0; }
-                    if (fabs(_nr) + fabs(_nr1) >= _os) break;
-
-                    int _ok = 1;
-                    if (_r <= n - 4 && _dv > 1e-300) {
-                        double _y = (-_bv * DM(dh,_r+2,_r,n) + _av * DM(dh,_r+2,_r+1,n)) / _dv;
-                        double _B = fabs(DM(dh, _r+2, _r+2, n));
-                        double _C = fabs(_nr1);
-                        double _d3 = sqrt(_y*_y + _B*_B);
-                        if (_d3 > 1e-300) {
-                            double _la = _d3 + _B * _C / _d3 - _C - _B;
-                            if (_la >= 0.0) _ok = 0;
-                        }
-                    }
-                    if (_ok) { NUDGE_SWAP(_r); _j++; }
-                    else break;
-                }
-            }
-#undef NUDGE_SWAP
-        }
-        /* strategy 0 ("standard"): no nudge — falls through */
-
-        goto tag120;
+        goto dp_iter;
     } else {
         /* izd == 1 or 2 */
         if (izd == 1) cnt_izd1++;
@@ -1354,7 +1367,7 @@ tag120:
                        ia_accum, ib_accum, ia_tmp, ih, iy,
                        mpm_prec, wy, &izip);
                 if (izip == 0)
-                    goto tag110;
+                    goto check_wy;
             }
             flush_ip_to_mpm(idb, it, n, mpm_prec, epsm, dreps,
                             ia_accum, ib_accum, wa, wb, wh, wy, &izmm);
@@ -1365,7 +1378,7 @@ tag120:
         }
 
         if (izmm == 0 && izd != 2) {
-            goto tag110;
+            goto check_wy;
         } else if (izmm == 1 || izd == 2) {
             cnt_fullmp++;
             if (izmm == 1) cnt_fullmp_izmm1++;
@@ -1374,11 +1387,7 @@ tag120:
                 it, cnt_fullmp, izmm, izd, it - g_last_fmp_it);
             g_last_fmp_it = it;
 
-            for (int _j = 0; _j < n; _j++)
-                for (int _i = 0; _i < n; _i++) {
-                    mag_zero(arb_radref(AM(wa, _i, _j, n)));
-                    mag_zero(arb_radref(AM(wb, _i, _j, n)));
-                }
+            strip_radius(n, wa, wb);
 
             if (idb >= 2) fprintf(stderr, "Iteration %8d  MP update\n", it);
             updtmp(idb, it, n, full_prec, mpm_prec, wa, wb, eps, b, h, y, &izm);
@@ -1395,23 +1404,23 @@ tag120:
 
             if (dplog10_arb(wn) > nrb) {
                 if (idb >= 1) fprintf(stderr, "Norm bound limit exceeded. %d\n", nrb);
-                goto tag160;
+                goto cleanup;
             }
             if (it > itm_param) {
                 if (idb >= 1) fprintf(stderr, "Iteration limit exceeded %d\n", itm_param);
-                goto tag160;
+                goto cleanup;
             }
 
-            if (izm == 0) goto tag100;
-            else if (izm == 1) goto tag150;
-            else goto tag160;
+            if (izm == 0) goto full_reinit;
+            else if (izm == 1) goto detect;
+            else goto cleanup;
         } else if (izmm == 2) {
-            goto tag160;
+            goto cleanup;
         }
     }
 
     /* ======== MPM iteration section: tag 130 ======== */
-tag130:
+mpm_section:
     izd = 0;
     its = it;
 
@@ -1439,7 +1448,7 @@ tag130:
 
         lqmpm(n, n1, mpm_prec2, wh);
 
-    tag140:
+    mpm_iter:
         it = it + 1;
         if (idb >= 2) fprintf(stderr, "Iteration %8d\n", it);
 
@@ -1451,13 +1460,9 @@ tag130:
         }
 
         if (izmm == 0) {
-            goto tag140;
+            goto mpm_iter;
         } else if (izmm == 1) {
-            for (int _j = 0; _j < n; _j++)
-                for (int _i = 0; _i < n; _i++) {
-                    mag_zero(arb_radref(AM(wa, _i, _j, n)));
-                    mag_zero(arb_radref(AM(wb, _i, _j, n)));
-                }
+            strip_radius(n, wa, wb);
 
             cnt_fullmp++;
             cnt_fullmp_mpm++;
@@ -1480,26 +1485,26 @@ tag130:
             }
             if (dplog10_arb(wn) > nrb) {
                 arb_clear(epsm2);
-                goto tag160;
+                goto cleanup;
             }
             if (it > itm_param) {
                 arb_clear(epsm2);
-                goto tag160;
+                goto cleanup;
             }
 
-            if (izm == 0) { arb_clear(epsm2); goto tag100; }
-            else if (izm == 1) { arb_clear(epsm2); goto tag150; }
-            else { arb_clear(epsm2); goto tag160; }
+            if (izm == 0) { arb_clear(epsm2); goto full_reinit; }
+            else if (izm == 1) { arb_clear(epsm2); goto detect; }
+            else { arb_clear(epsm2); goto cleanup; }
         } else if (izmm == 2) {
             arb_clear(epsm2);
-            goto tag160;
+            goto cleanup;
         }
 
         arb_clear(epsm2);
     }
 
     /* ======== Detection section: tag 150 ======== */
-tag150:
+detect:
     {
         arb_t det_t1, det_t2;
         arb_init(det_t1); arb_init(det_t2);
@@ -1588,7 +1593,7 @@ tag150:
     }
 
     /* ======== Final section: tag 160 ======== */
-tag160:
+cleanup:
     free(da); free(db); free(dh); free(dsa); free(dsb); free(dsh);
     free(dsyq); free(dy); free(dsy);
 
@@ -1624,10 +1629,7 @@ tag160:
     fprintf(stderr, "[PROFILE] izd: 0=%d 1=%d(deps=%d,tmx1=%d) 2=%d  fullMP=%d  savedp=%d  ipm=%d\n",
             cnt_izd0, cnt_izd1, g_cnt_izd1_deps, g_cnt_izd1_tmx1, cnt_izd2, cnt_fullmp, cnt_savedp, ipm);
 
-    fprintf(stderr, "SWAP_HIST_NUDGE(%ld):", g_nudge_swap_cnt);
-    for (int _i = 0; _i < n - 1; _i++)
-        fprintf(stderr, " %d:%d", _i, g_rot_counts[_i]);
-    fprintf(stderr, "\n");
+    fprintf(stderr, "PREDICTED_SWAPS: %ld\n", g_predicted_swap_cnt);
 
     {
         const char *_sf_path = getenv("V2_STATS_FILE");
@@ -1640,7 +1642,7 @@ tag160:
                         "\"iterdp_sec\":%.2f,\"iterdp_calls\":%d,"
                         "\"izd1_deps\":%d,\"izd1_tmx1\":%d,"
                         "\"ipm\":%d,\"strat\":%d,"
-                        "\"nudge_swaps\":%ld,"
+                        "\"predicted_swaps\":%ld,"
                         "\"fullmp_izmm1\":%d,\"fullmp_izd2\":%d,\"fullmp_mpm\":%d,"
                         "\"izmm_wy_small\":%d,\"izmm_wy_ratio\":%d,\"izmm_wab_large\":%d}\n",
                     iq, it, cnt_izd0, cnt_izd1, cnt_izd2,
@@ -1650,7 +1652,7 @@ tag160:
                     g_iterdp_sec, g_iterdp_calls,
                     g_cnt_izd1_deps, g_cnt_izd1_tmx1,
                     ipm, g_strategy,
-                    g_nudge_swap_cnt,
+                    g_predicted_swap_cnt,
                     cnt_fullmp_izmm1, cnt_fullmp_izd2, cnt_fullmp_mpm,
                     g_izmm_wy_small, g_izmm_wy_ratio, g_izmm_wab_large);
             fclose(sf);
@@ -1678,7 +1680,6 @@ int pslqm3_c(
 {
     (void)unused1;
     memset(result, 0, (size_t)n * sizeof(int64_t));
-    g_debug = 0;
 
     /* Threading */
     {

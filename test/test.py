@@ -102,7 +102,7 @@ def _run_pslq_raw(x_strs, n, digits, ndpm, ndr, nrb, itm,
         "digits": digits,
         "iterations": stats.get("it", 0),
         "fullmp": stats.get("fullmp", 0),
-        "nudge_swaps": stats.get("nudge_swaps", 0),
+        "predicted_swaps": stats.get("predicted_swaps", 0),
         "mxmdm_sec": stats.get("mxmdm_sec", 0),
         "updtmp_sec": stats.get("updtmpm_sec", 0) + stats.get("mxm_sec", 0),
         "stats": stats,
@@ -114,7 +114,7 @@ def print_result_row(r):
     qp_str = f"ip={r['ip_bits']}" if r["ip_bits"] > 0 else "no-ip"
     print(f"  [{status}] {r['strategy']:16s} ndpm={r['ndpm']:<5d} {qp_str:<10s} "
           f"{r['elapsed']:7.1f}s  it={r['iterations']:<7d} fmp={r['fullmp']:<3d} "
-          f"nudge={r['nudge_swaps']}")
+          f"swaps={r['predicted_swaps']}")
 
 
 def run_quick_smoke():

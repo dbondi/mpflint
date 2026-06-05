@@ -135,7 +135,7 @@ def run_pslq(x_strs, n, digits, ndpm, ndr, nrb, itm,
         "digits": digits,
         "iterations": stats.get("it", 0),
         "fullmp": stats.get("fullmp", 0),
-        "nudge_swaps": stats.get("nudge_swaps", 0),
+        "predicted_swaps": stats.get("predicted_swaps", 0),
         "mxmdm_sec": stats.get("mxmdm_sec", 0),
         "mxm_sec": stats.get("mxm_sec", 0),
         "updtmpm_sec": stats.get("updtmpm_sec", 0),
@@ -156,7 +156,7 @@ def print_row(r):
     thr = f" t{r['threads']}" if r["threads"] > 1 else ""
     config = f"{r['strategy']:<16s} ndpm={r['ndpm']:<5d}{qp}{thr}"
     print(f"{config:<45s} {r['elapsed']:7.1f}s {r['iterations']:>7d} {r['fullmp']:>4d} "
-          f"{r['nudge_swaps']:>8d} {r['mxmdm_sec']:>6.1f}s {r['mxm_sec']:>6.1f}s {status:>6s}")
+          f"{r['predicted_swaps']:>8d} {r['mxmdm_sec']:>6.1f}s {r['mxm_sec']:>6.1f}s {status:>6s}")
 
 
 def run_poisson_psi_s24_benchmarks(threads=1):

@@ -52,7 +52,7 @@ The optimal ndpm balances cheaper mxmdm calls against more frequent fullMP updat
 
 This requires no code changes, just setting a lower ndpm value. Finding the optimal value for a new problem does require an empirical sweep.
 
-### 3. Intermediate Precision Layer (IP/QP)
+### 3. Intermediate Precision Layer (IP)
 
 The standard 3-level algorithm flushes DP operations directly to MPM, which is expensive when ndpm is large. The IP layer adds a buffer between DP and MPM:
 
@@ -71,6 +71,8 @@ The DP row operations (da, db matrices) are integer-valued at double precision �
 **Optimal IP value:** H_col_spread / 6 (validated across 8 problems within ±10%). This could be computed automatically at runtime from the initial H matrix.
 
 **When IP doesn't work:** Problems with narrow H_spread (e.g., Poisson φ₂ s=30, H_spread=241 bits) or nonzero izd=2 counts (e.g., Poisson φ₂ S29) cannot use IP. The Poisson ψ₂ family (s=24, s=22, s=17, etc.) generally has wide H_spread and works well with IP.
+
+**Stability warning:** The IP layer is still experimental. It has been tested on a limited set of problems and is known to occasionally cause unexpected failures on problems outside the tested families. If a run fails with IP enabled, retry with `IP_BITS=0` to disable it. Further work is needed to understand its failure modes and make it robust across arbitrary inputs.
 
 ### 4. Predicted Swap Strategy
 
@@ -105,7 +107,7 @@ This doesn't always translate to meaningful speedup. On psi_s24 (n=65), predicte
 
 ### 5. Threading
 
-The tradeoffs from lower ndpm (more fullMPs) and predicted_swap (more mxmdm calls per iteration) both become less costly when those operations are threaded — which FLINT supports and MPFUN does not.
+The tradeoffs from lower ndpm (more fullMPs) and predicted_swap both become less costly when those operations are threaded, which FLINT supports via CRT parallelism and ColPar.
 
 **psi_s24 thread scaling (predicted_swap + ndpm=1000 + IP=300):**
 
@@ -130,7 +132,7 @@ All optimizations stack multiplicatively:
 | + IP=300 | 116s | 4.6× |
 | + 4 threads | 37.6s | **14×** |
 
-**Poisson φ₂ s=29 (n=197), 4 threads — no QP (izd=2 prevents it):**
+**Poisson φ₂ s=29 (n=197), 4 threads — no IP (izd=2 prevents it):**
 
 | Config | Wall | vs standard baseline |
 |--------|------|--------------------|
@@ -156,7 +158,7 @@ Note: phi_s29's default ndpm is already 1000 (Bailey's setting for this problem)
 |-------------|-----------|-------------------|
 | Lower ndpm | Small n (mxmdm dominates) | Large n (fullMP dominates) |
 | Predicted_swap | Always reduces iterations | Smallest wall-time gain on easy problems |
-| IP/QP | H_spread > 370 AND izd=2 = 0 | Narrow H_spread or izd=2 > 0 |
+| IP | H_spread > 370 AND izd=2 = 0 | Narrow H_spread or izd=2 > 0 |
 | Threading | Always helps to 8-16 threads | Diminishing returns past 16 for n < 200 |
 
 ## Problem Families Tested
@@ -221,10 +223,10 @@ Results are saved to `test/performance_results.json` and summarized in `test/res
 
 | File | Lines | Description |
 |------|-------|-------------|
-| `pslqm3.c` | 1769 | Main PSLQ engine — DP/MPM/fullMP cycle, strategy dispatch, entry point |
+| `pslqm3.c` | 1777 | Main PSLQ engine — DP/MPM/fullMP cycle, strategy dispatch, entry point |
 | `pslq_matmul.c` | 359 | CRT matrix multiply (mxmdm, mxm) + ColPar column-parallel threading |
 | `pslq_4level.c` | 249 | Intermediate precision layer — IP init, update, flush to MPM |
-| `pslq_arb.h` | 212 | MPFUN-compatible arb wrappers (round-to-nearest matching Fortran semantics) |
+| `pslq_arb.h` | 212 | Arb wrappers (round-to-nearest matching Fortran semantics) |
 | `pslq_sort.c` | 171 | Quicksort for pair selection (exact Fortran translation) |
 
 ### Using from Python (ctypes)
