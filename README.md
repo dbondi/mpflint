@@ -74,7 +74,7 @@ The DP row operations (da, db matrices) are integer-valued at double precision �
 
 **Optimal IP value:** H_col_spread / 6 (validated across 8 problems within ±10%). This could be computed automatically at runtime from the initial H matrix.
 
-**When IP doesn't work:** Whether IP is viable depends on the problem's input constant α and its effect on the H matrix structure. The test problems come from Bailey's Poisson summation work ([poisson-psi.pdf](https://www.davidhbailey.com/dhbpapers/poisson-psi.pdf), [poisson.pdf](https://www.davidhbailey.com/dhbpapers/poisson.pdf)), which studies two lattice sum families:
+**When IP doesn't work:** Whether IP is viable depends on the problem's input constant α and its effect on the H matrix structure. The test problems come from Bailey's Poisson summation work ([poisson-psi.pdf](https://www.davidhbailey.com/dhbpapers/poisson-psi.pdf)), which studies two lattice sum families:
 
 - **ψ₂(p/s, q/s)** — even-index lattice sum. α = exp(−8πs·ψ₂). These tend to produce wide H_spread because |log₁₀(α)| is large, giving IP room to absorb DP flushes. Examples: s=24 (p=2, q=5), s=22, s=17.
 - **φ₂(1/s, 1/s)** — standard lattice sum. α = exp(8π·φ₂). These tend to produce izd=2 events (DP overflow), which prevents IP from working. Examples: s=29, s=30.
