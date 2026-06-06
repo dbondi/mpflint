@@ -4,6 +4,10 @@ A reimplementation of Bailey's multipair PSLQ algorithm in C using the [FLINT](h
 
 All benchmarks in this document were run on the same machine: Apple M1 Max, 64 GB RAM, macOS, FLINT 3.5, compiled with `cc -O2 -march=native`.
 
+![PSLQ Convergence](visualizations/pslq_convergence.gif)
+
+*H diagonal evolution on BBP π (n=31). Standard takes 136 iterations; predicted_swap converges in 36. Red bars show columns selected for swap. Interactive versions: [standard](visualizations/pslq_explorer_standard.html) | [predicted_swap](visualizations/pslq_explorer_predicted_swap.html)*
+
 ## How PSLQ Works
 
 Given a vector of real numbers **x** = (x₁, x₂, ..., xₙ), PSLQ finds integer coefficients **m** = (m₁, m₂, ..., mₙ) such that m₁x₁ + m₂x₂ + ... + mₙxₙ = 0, or certifies that no such relation exists with norm below a computable bound. This is used to discover BBP-type formulas, minimal polynomials, and Poisson summation identities.
@@ -78,12 +82,33 @@ The DP row operations (da, db matrices) are integer-valued at double precision �
 
 Bailey's original PSLQ selects swap pairs based on γ^i × |H[i,i]| ranking — it picks the disjoint pairs with the largest weighted diagonals, swaps them, applies Givens rotations, and moves on. No further reordering is done within the DP iteration.
 
-The **predicted_swap** strategy adds a second pass: after the standard pair selection and Givens rotations, it runs a bidirectional insertion sort over the H diagonal. Each candidate swap is evaluated by simulating the Givens rotation that would follow:
+The **predicted_swap** strategy adds a second pass: after the standard pair selection and Givens rotations, it runs a bidirectional insertion sort over the H diagonal. Each candidate swap is evaluated by simulating the Givens rotation that would follow.
 
-1. For a candidate swap at position r, compute `d = sqrt(H[r+1,r]² + H[r+1,r+1]²)` — what `H[r,r]` would become after rotation.
-2. Compute the predicted `H[r+1,r+1]` from the rotation formula.
-3. Accept only if the predicted diagonal sum improves: `|new_d[r]| + |new_d[r+1]| < |old_d[r]| + |old_d[r+1]|`.
-4. Check the **neighbor position** — verify the swap won't worsen the adjacent diagonal, preventing oscillation.
+For a candidate swap at position r, the Givens rotation that restores lower-triangular form produces new diagonal entries:
+
+```
+d  = √(H[r+1,r]² + H[r+1,r+1]²)
+
+H'[r,r]   = d
+H'[r+1,r+1] = (-H[r,r]·H[r+1,r+1] + H[r,r+1]·H[r+1,r]) / d
+```
+
+The swap is accepted only if the **diagsum criterion** holds:
+
+```
+|H'[r,r]| + |H'[r+1,r+1]| < |H[r,r]| + |H[r+1,r+1]|
+```
+
+Before committing, a **neighbor check** prevents oscillation. For the forward pass (checking position r-1):
+
+```
+x  = H[r+1,r-1]
+d₂ = √(x² + d²)
+
+reject if:  d₂ + d·|H[r-1,r-1]|/d₂ - |H[r-1,r-1]| - d  ≥  0
+```
+
+This tests whether swapping at r would worsen the adjacent position's potential for improvement. The backward pass applies an analogous check at position r+1.
 
 The forward pass sorts left to right, the backward pass right to left.
 
