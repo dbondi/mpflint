@@ -6,7 +6,7 @@ All benchmarks in this document were run on the same machine: Apple M1 Max, 64 G
 
 ![PSLQ Convergence](visualizations/pslq_convergence.gif)
 
-*min|y| over iterations on BBP π (n=9). When min|y| drops below ε, a relation is detected. Standard (blue) takes 18 iterations; predicted_swap (green) converges in 4.*
+*BBP π (n=9). Left/center: H diagonal evolution. Right: min|y| convergence. Standard (blue, 18 iterations) vs predicted_swap (green, 4 iterations).*
 
 ## How PSLQ Works
 
