@@ -6,7 +6,7 @@ All benchmarks in this document were run on the same machine: Apple M1 Max, 64 G
 
 ![PSLQ Convergence](visualizations/pslq_convergence.gif)
 
-*H diagonal evolution on BBP π (n=9). Standard (blue, 18 iterations) vs predicted_swap (green, 4 iterations). Interactive versions: [standard](visualizations/pslq_explorer_standard.html) | [predicted_swap](visualizations/pslq_explorer_predicted_swap.html)*
+*Convergence rate on BBP π (n=9). Standard (blue) takes 18 iterations; predicted_swap (green) converges in 4. Interactive versions: [standard](visualizations/pslq_explorer_standard.html) | [predicted_swap](visualizations/pslq_explorer_predicted_swap.html)*
 
 ## How PSLQ Works
 
@@ -82,7 +82,13 @@ The DP row operations (da, db matrices) are integer-valued at double precision �
 
 Bailey's original PSLQ selects swap pairs based on γ^i × |H[i,i]| ranking — it picks the disjoint pairs with the largest weighted diagonals, swaps them, applies Givens rotations, and moves on. No further reordering is done within the DP iteration.
 
-The **predicted_swap** strategy adds a second pass: after the standard pair selection and Givens rotations, it runs a bidirectional insertion sort over the H diagonal. Each candidate swap is evaluated by simulating the Givens rotation that would follow.
+The **predicted_swap** strategy adds a fourth pass to each DP iteration:
+
+![Iteration Phases](visualizations/pslq_iteration_phases.png)
+
+*Standard PSLQ runs steps 1–3. Predicted swap adds a fourth pass — bidirectional insertion sort with Givens simulation.*
+
+Each candidate swap is evaluated by simulating the Givens rotation that would follow.
 
 For a candidate swap at position r, the Givens rotation that restores lower-triangular form produces new diagonal entries:
 
@@ -111,6 +117,10 @@ reject if:  d₂ + d·|H[r-1,r-1]|/d₂ - |H[r-1,r-1]| - d  ≥  0
 This tests whether swapping at r would worsen the adjacent position's potential for improvement. The backward pass applies an analogous check at position r+1.
 
 The forward pass sorts left to right, the backward pass right to left.
+
+![Predicted Swap Detail](visualizations/pslq_predicted_swap_detail.gif)
+
+*The insertion sort in action. Triangle marks the outer loop position. Gold = Givens simulation, green = accepted swap, red = rejected. The ✓/✗ counter tracks accept/reject decisions. Position numbers below bars track how elements move.*
 
 **Where it matters most.** Predicted_swap's impact scales with problem difficulty. On phi_s29 (n=197), the profile data shows clearly how the iteration reduction cascades:
 
