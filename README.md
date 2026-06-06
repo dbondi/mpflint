@@ -1,6 +1,6 @@
 # PSLQ Integer Relation Detection — C/FLINT Implementation
 
-A reimplementation of Bailey's multipair PSLQ algorithm in C using the [FLINT](https://flintlib.org/) arbitrary-precision library. On an Apple M1 Max (64 GB), the combined optimizations achieve 4–14× speedups over the single-threaded FLINT baseline (standard strategy, Bailey's default ndpm) across Poisson summation problems.
+A reimplementation of Bailey's multipair PSLQ algorithm in C using the [FLINT](https://flintlib.org/) arbitrary-precision library. On an Apple M1 Max (64 GB), the combined optimizations achieve up to 13× speedup over Bailey's Fortran MPFUN20-MPFR v33 on the same machine.
 
 All benchmarks in this document were run on the same machine: Apple M1 Max, 64 GB RAM, macOS, FLINT 3.5, compiled with `cc -O2 -march=native`.
 
@@ -164,15 +164,16 @@ Scaling is near-linear to 4 threads on Apple Silicon. Previous AWS benchmarks sh
 
 All optimizations stack multiplicatively:
 
-**Poisson ψ₂ s=24 (n=65) vs MPFUN2020 baseline (532s, ndpm=3000, 1 thread):**
+**Poisson ψ₂ s=24 (n=65), all on M1 Max 64 GB, single machine:**
 
-| Optimization | Wall | Cumulative speedup |
-|-------------|------|--------------------|
-| FLINT standard ndpm=3000, 1 thread | 529s | baseline |
+| Configuration | Wall | vs Fortran |
+|--------------|------|-----------| 
+| Fortran MPFUN20-MPFR v33, ndpm=3000, 1 thread | 506s | baseline |
+| FLINT standard ndpm=3000, 1 thread | 529s | 1.0× |
 | + predicted_swap | 476s | 1.1× |
-| + ndpm=1000 | 175s | 3.0× |
-| + IP=300 | 116s | 4.6× |
-| + 4 threads | 37.6s | **14×** |
+| + ndpm=1000 | 175s | 2.9× |
+| + IP=300 | 116s | 4.4× |
+| + 4 threads | 37.6s | **13.4×** |
 
 **Poisson φ₂ s=29 (n=197), 4 threads — no IP (izd=2 prevents it):**
 
