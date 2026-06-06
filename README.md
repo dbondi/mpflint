@@ -6,7 +6,7 @@ All benchmarks in this document were run on the same machine: Apple M1 Max, 64 G
 
 ![PSLQ Convergence](visualizations/pslq_convergence.gif)
 
-*Convergence rate on BBP π (n=9). Standard (blue) takes 18 iterations; predicted_swap (green) converges in 4. Interactive versions: [standard](visualizations/pslq_explorer_standard.html) | [predicted_swap](visualizations/pslq_explorer_predicted_swap.html)*
+*Convergence rate on BBP π (n=9). Standard (blue) takes 18 iterations; predicted_swap (green) converges in 4.*
 
 ## How PSLQ Works
 
