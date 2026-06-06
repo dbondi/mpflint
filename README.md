@@ -6,7 +6,7 @@ All benchmarks in this document were run on the same machine: Apple M1 Max, 64 G
 
 ![PSLQ Convergence](visualizations/pslq_convergence.gif)
 
-*H diagonal evolution on BBP π (n=31). Standard (blue, 136 iterations) vs predicted_swap (green, 36 iterations). Red bars indicate columns selected for swap at each step. Interactive versions: [standard](visualizations/pslq_explorer_standard.html) | [predicted_swap](visualizations/pslq_explorer_predicted_swap.html)*
+*H diagonal evolution on BBP π (n=9). Standard (blue, 18 iterations) vs predicted_swap (green, 4 iterations). Interactive versions: [standard](visualizations/pslq_explorer_standard.html) | [predicted_swap](visualizations/pslq_explorer_predicted_swap.html)*
 
 ## How PSLQ Works
 
