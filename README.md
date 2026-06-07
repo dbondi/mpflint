@@ -76,10 +76,10 @@ The DP row operations (da, db matrices) are integer-valued at double precision �
 
 **When IP doesn't work:** Whether IP is viable depends on the problem's input constant α and its effect on the H matrix structure. The test problems come from Bailey's Poisson summation work ([poisson-psi.pdf](https://www.davidhbailey.com/dhbpapers/poisson-psi.pdf)), which studies two lattice sum families:
 
-- **ψ₂(p/s, q/s)** — even-index lattice sum. α = exp(−8πs·ψ₂). These tend to produce wide H_spread because |log₁₀(α)| is large, giving IP room to absorb DP flushes. Examples: s=24 (p=2, q=5), s=22, s=17.
+- **ψ₂(p/s, q/s)** — even-index lattice sum. α = exp(−8πs·ψ₂). These tend to produce wide H_col_spread because |log₁₀(α)| is large, giving IP room to absorb DP flushes. Examples: s=24 (p=2, q=5), s=22, s=17.
 - **φ₂(1/s, 1/s)** — standard lattice sum. α = exp(8π·φ₂). These tend to produce izd=2 events (DP overflow), which prevents IP from working. Examples: s=29, s=30.
 
-The distinction is not inherent to ψ₂ vs φ₂ — it depends on the specific (s, p, q) parameters and the resulting H_spread and izd=2 behavior.
+The distinction is not inherent to ψ₂ vs φ₂ — it depends on the specific (s, p, q) parameters and the resulting H_col_spread and izd=2 behavior.
 
 **Stability warning:** The IP layer is still experimental. It has been tested on a limited set of problems and is known to occasionally cause unexpected failures on problems outside the tested families. If a run fails with IP enabled, retry with `IP_BITS=0` to disable it. Further work is needed to understand its failure modes and make it robust across arbitrary inputs.
 
@@ -217,7 +217,7 @@ Note: phi_s29's default ndpm is already 1000 (Bailey's setting for this problem)
 |-------------|-----------|-------------------|
 | Lower ndpm | Small n (mxmdm dominates) | Large n (fullMP dominates) |
 | Predicted_swap | Always reduces iterations | Smallest wall-time gain on easy problems |
-| IP | H_spread > 370 AND izd=2 = 0 | Narrow H_spread or izd=2 > 0 |
+| IP | H_col_spread > 370 AND izd=2 = 0 | Narrow H_col_spread or izd=2 > 0 |
 | Threading | Always helps to 8-16 threads | Diminishing returns past 16 for n < 200 |
 
 ## Problem Families Tested
@@ -230,7 +230,7 @@ Note: phi_s29's default ndpm is already 1000 (Bailey's setting for this problem)
 | phi_s29 | Poisson φ₂ | 197 | 196 | φ₂(1/29, 1/29) standard lattice sum |
 
 The two Poisson families differ in their lattice sum structure:
-- **ψ₂ (psi)**: Even-index lattice sum. α = exp(−8πs·ψ₂(p/s, q/s)). Tends to have wide H_spread → IP viable.
+- **ψ₂ (psi)**: Even-index lattice sum. α = exp(−8πs·ψ₂(p/s, q/s)). Tends to have wide H_col_spread → IP viable.
 - **φ₂ (phi)**: Standard lattice sum. α = exp(8π·φ₂(1/s, 1/s)). Tends to have izd=2 > 0 → IP not viable.
 
 ---
@@ -275,7 +275,7 @@ Results are saved to `test/performance_results.json` and summarized in `test/res
 |----------|---------|-------------|
 | `STRATEGY` | `predicted_swap` | `standard` (no nudge) or `predicted_swap` (Givens-aware sort) |
 | `THREADS` | `1` | FLINT thread count for CRT parallelism |
-| `IP_BITS` | `0` (disabled) | Intermediate precision layer in bits. Set to H_spread/6 when viable |
+| `IP_BITS` | `0` (disabled) | Intermediate precision layer in bits. Set to H_col_spread/6 when viable |
 | `IPM_OVERRIDE` | `10` | DP iterations per MPM checkpoint batch |
 
 ### Source Files
