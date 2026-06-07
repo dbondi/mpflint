@@ -160,7 +160,7 @@ We implemented four criteria from this literature as repeated-global-best multi-
 
 All multi-swap strategies produce ~4× iteration reduction over standard. The specific criterion barely matters — babai and potential give identical results, diagsum and squared-sum are within 2% of each other. Predicted_swap wins on most problems by a small margin (1–6%).
 
-**Relationship to other strategies.** Predicted_swap was selected from a search over ~100 strategies. Many produce similar iteration counts. This one was the fastest across problem families tested and has been stable on every problem — several alternatives occasionally caused divergence on specific problems where predicted_swap did not.
+**Why predicted_swap.** Predicted_swap was developed independently from a search over ~100 strategies before the author became aware of the LLL literature above. It happens to produce slightly better iteration counts and has been stable on every problem tested. Several alternative strategies occasionally caused divergence on specific problems where predicted_swap did not.
 
 ### 5. Threading
 
