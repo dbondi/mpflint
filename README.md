@@ -1,6 +1,6 @@
 # PSLQ Integer Relation Detection — C/FLINT Implementation
 
-A reimplementation of Bailey's multipair PSLQ algorithm in C using the [FLINT](https://flintlib.org/) arbitrary-precision library. On an Apple M1 Max (64 GB), the combined optimizations achieve 13–20× speedup over Bailey's Fortran MPFUN20-MPFR v33 on the same machine.
+A reimplementation of Bailey's multipair PSLQ algorithm in C using the [FLINT](https://flintlib.org/) arbitrary-precision library. On an Apple M1 Max (64 GB), the combined optimizations achieve 4–20× speedup over Bailey's Fortran MPFUN20-MPFR on the same machine.
 
 All benchmarks in this document were run on the same machine: Apple M1 Max, 64 GB RAM, macOS, FLINT 3.5, compiled with `cc -O2 -march=native`.
 
@@ -168,7 +168,7 @@ All optimizations stack multiplicatively:
 
 | Configuration | Wall | vs Fortran |
 |--------------|------|-----------| 
-| Fortran MPFUN20-MPFR v33, ndpm=3000, 1 thread | 506s | baseline |
+| Fortran MPFUN20-MPFR, ndpm=3000, 1 thread | 506s | baseline |
 | FLINT standard ndpm=3000, 1 thread | 529s | 1.0× |
 | + predicted_swap | 476s | 1.1× |
 | + ndpm=1000 | 175s | 2.9× |
@@ -188,7 +188,7 @@ All optimizations stack multiplicatively:
 
 | Config | Time | vs Fortran |
 |--------|------|-----------|
-| Fortran MPFUN20-MPFR v33, ndpm=1000, 1 thread | 21,288s (5.9 hr) | baseline |
+| Fortran MPFUN20-MPFR, ndpm=1000, 1 thread | 21,288s (5.9 hr) | baseline |
 | FLINT standard ndpm=1000, 1 thread | 7,387s (2.1 hr) | 2.9× |
 | + predicted_swap | 3,596s (60 min) | 5.9× |
 | + 4 threads | 1,183s (20 min) | 18× |
