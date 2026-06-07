@@ -158,9 +158,9 @@ We implemented four criteria from this literature as repeated-global-best multi-
 | potential (PotLLL) | position-weighted log decrease | 103 | 3,376 | 1,374 | 913 |
 | **predicted_swap** | **diagsum + neighbor check** | **94** | **3,332** | **1,369** | 929 |
 
-All multi-swap strategies produce ~4× iteration reduction over standard. The specific criterion barely matters — babai and potential give identical results, diagsum and squared-sum are within 2% of each other. Predicted_swap wins on most problems by a small margin (1–6%), likely due to its neighbor oscillation check which prevents wasted swaps.
+All multi-swap strategies produce ~4× iteration reduction over standard. The specific criterion barely matters — babai and potential give identical results, diagsum and squared-sum are within 2% of each other. Predicted_swap wins on most problems by a small margin (1–6%).
 
-**Relationship to other strategies.** Predicted_swap was selected from an exhaustive search over ~100 sorting variants. Many produce similar iteration counts. This one was the fastest across problem families tested and has been stable on every problem — several of the alternatives occasionally caused divergence on specific problems where predicted_swap did not.
+**Relationship to other strategies.** Predicted_swap was selected from a search over ~100 strategies. Many produce similar iteration counts. This one was the fastest across problem families tested and has been stable on every problem — several alternatives occasionally caused divergence on specific problems where predicted_swap did not.
 
 ### 5. Threading
 
