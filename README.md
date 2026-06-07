@@ -1,6 +1,6 @@
 # PSLQ Integer Relation Detection — C/FLINT Implementation
 
-A reimplementation of Bailey's multipair PSLQ algorithm in C using the [FLINT](https://flintlib.org/) arbitrary-precision library. On an Apple M1 Max (64 GB), the combined optimizations achieve 13–21× speedup over Bailey's Fortran MPFUN20-MPFR v33 on the same machine.
+A reimplementation of Bailey's multipair PSLQ algorithm in C using the [FLINT](https://flintlib.org/) arbitrary-precision library. On an Apple M1 Max (64 GB), the combined optimizations achieve 13–20× speedup over Bailey's Fortran MPFUN20-MPFR v33 on the same machine.
 
 All benchmarks in this document were run on the same machine: Apple M1 Max, 64 GB RAM, macOS, FLINT 3.5, compiled with `cc -O2 -march=native`.
 
@@ -188,13 +188,11 @@ All optimizations stack multiplicatively:
 
 | Config | Time | vs Fortran |
 |--------|------|-----------|
-| Fortran MPFUN20-MPFR v33, ndpm=1000, 1 thread | 22,514s (6.3 hr)* | baseline |
-| FLINT standard ndpm=1000, 1 thread | 7,387s (2.1 hr) | 3.0× |
-| + predicted_swap | 3,596s (60 min) | 6.3× |
-| + 4 threads | 1,183s (20 min) | 19× |
-| + ndpm=800 | 1,088s (18 min) | **21×** |
-
-*\*Fortran failed to detect the relation at ndpm=1000 (insufficient dynamic range at detection). Our C/FLINT code succeeds at the same ndpm. The Fortran CPU time is reported as-is.*
+| Fortran MPFUN20-MPFR v33, ndpm=1000, 1 thread | 21,288s (5.9 hr) | baseline |
+| FLINT standard ndpm=1000, 1 thread | 7,387s (2.1 hr) | 2.9× |
+| + predicted_swap | 3,596s (60 min) | 5.9× |
+| + 4 threads | 1,183s (20 min) | 18× |
+| + ndpm=800 | 1,088s (18 min) | **20×** |
 
 Note: phi_s29's default ndpm is already 1000 (Bailey's setting for this problem), so unlike psi_s24 there is no large ndpm reduction available. phi_s29 gains are smaller than psi_s24 because IP is unavailable (izd=2 > 0) and fullMP dominates at n=197 (~34s per fullMP at 1 thread). The predicted_swap iteration reduction (4.8× fewer) translates to 2.1× wall time through fewer mxmdm calls, and threading adds another 3.0×.
 
