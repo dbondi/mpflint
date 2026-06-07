@@ -147,9 +147,20 @@ This doesn't always translate to meaningful speedup. On psi_s24 (n=65), predicte
 
 **Related work in lattice reduction.** The idea of simulating a swap before committing exists in the LLL lattice reduction literature. [GfcLLL](https://ar5iv.labs.arxiv.org/html/1607.01064) (Jaldén & Elia, 2016) uses the same Givens prediction mathematics to evaluate adjacent swap pairs. [SS-LLL](https://eprint.iacr.org/2023/261) (Ryan et al., 2023) scores candidate deep insertions by decrease in sum-of-squared Gram-Schmidt norms. [PotLLL](https://arxiv.org/abs/1212.5100) (Fontein et al., 2014) gates deep insertions on whether the basis potential decreases.
 
-We implemented these criteria in our PSLQ context. Adapting GfcLLL's diagsum criterion as a repeated global best pick (scan all pairs, execute the best, re-scan until no improvement) produces ~4× iteration reduction — close to predicted_swap but consistently 5–7% worse. When we applied the Babai, SS, and potential criteria within our bidirectional insertion sort structure, all three produced identical iteration counts to each other but trailed predicted_swap by 5–7%, suggesting the specific criterion matters less than the sort structure and the neighbor oscillation check.
+We implemented four criteria from this literature as repeated-global-best multi-swap strategies in our PSLQ context, and compared them against predicted_swap:
 
-**Relationship to other strategies.** Predicted_swap was selected from an exhaustive search over ~100 sorting variants, including: pure bidirectional sort without simulation, exponential decay weighting, product and max-reduction criteria, multi-pass variants, rolling-window lookahead, and numerous heuristic scoring functions. Many produce similar iteration counts to predicted_swap. This one was the fastest across problem families tested and has been stable on every problem — several of the alternatives occasionally caused divergence on specific problems where predicted_swap did not.
+| Strategy | Criterion | BBP60 | H2 | H3 | synth120 |
+|----------|-----------|-------|------|------|----------|
+| standard | none | 431 | 12,383 | 4,835 | 3,894 |
+| diagsum (GfcLLL) | \|d[r]\|+\|d[r+1]\| decreases | 100 | 3,508 | 1,379 | 929 |
+| babai (GfcLLL T¹) | \|old_d[r]\|/\|new_d[r]\| > 1 | 103 | 3,376 | 1,374 | 913 |
+| squared-sum (SS-LLL) | d[r]²+d[r+1]² decreases | 102 | 3,456 | 1,443 | 937 |
+| potential (PotLLL) | position-weighted log decrease | 103 | 3,376 | 1,374 | 913 |
+| **predicted_swap** | **diagsum + neighbor check** | **94** | **3,332** | **1,369** | 929 |
+
+All multi-swap strategies produce ~4× iteration reduction over standard. The specific criterion barely matters — babai and potential give identical results, diagsum and squared-sum are within 2% of each other. Predicted_swap wins on most problems by a small margin (1–6%), likely due to its neighbor oscillation check which prevents wasted swaps.
+
+**Relationship to other strategies.** Predicted_swap was selected from an exhaustive search over ~100 sorting variants. Many produce similar iteration counts. This one was the fastest across problem families tested and has been stable on every problem — several of the alternatives occasionally caused divergence on specific problems where predicted_swap did not.
 
 ### 5. Threading
 
